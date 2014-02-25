@@ -60,7 +60,7 @@ struct WebServer {
     www_dir_path: ~Path,
     
 	//visitor_arc: Arc<~int>,
-	//visitor_arc: RWArc<int>,
+	visitor_arc: RWArc<uint>,
     request_queue_arc: MutexArc<~[HTTP_Request]>,
     stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
     
@@ -80,7 +80,7 @@ impl WebServer {
             port: port,
             www_dir_path: www_dir_path,
             
-			//visitor_arc: RWArc::new(counter),
+			visitor_arc: RWArc::new(0u),
 			//visitor_arc: Arc::new(counter),            
             request_queue_arc: MutexArc::new(~[]),
             stream_map_arc: MutexArc::new(HashMap::new()),
@@ -102,7 +102,7 @@ impl WebServer {
         let request_queue_arc = self.request_queue_arc.clone();
         let shared_notify_chan = self.shared_notify_chan.clone();
         let stream_map_arc = self.stream_map_arc.clone();
-		//let visitor_arc = self.visitor_arc.clone();        
+		let visitor_arc = self.visitor_arc.clone();        
         
         spawn(proc() {
             let mut acceptor = net::tcp::TcpListener::bind(addr).listen();
@@ -117,7 +117,9 @@ impl WebServer {
                 let stream_map_arc = stream_map_arc.clone();
                	//let visitor_arc = visitor_arc.clone(); 
                 // Spawn a task to handle the connection.
+                let ccounter = visitor_arc.clone();
                 spawn(proc() {
+                    WebServer::update_count(ccounter);
                     //let mut visitor_arc = visitor_arc.clone();
 					//let mut visitor_count = visitor_arc.get();//
 					unsafe { visitor_count += 1; } // TODO: Fix unsafe counter
@@ -156,7 +158,7 @@ impl WebServer {
                              
                         if path_str == ~"./" {
                             debug!("===== Counter Page request =====");
-                            WebServer::respond_with_counter_page(stream); //WebServer test welp
+                            WebServer::respond_with_counter_page(stream, ccounter); //WebServer test welp
                             debug!("=====Terminated connection from [{:s}].=====", peer_name);
                         } else if !path_obj.exists() || path_obj.is_dir() {
                             debug!("===== Error page request =====");
@@ -176,6 +178,10 @@ impl WebServer {
         });
     }
 	
+    fn update_count(counter: RWArc<uint>) {
+     
+        counter.write(|count|{*count+=1;})
+    }
 
     fn respond_with_error_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         let mut stream = stream;
@@ -189,7 +195,7 @@ impl WebServer {
 	//	*r += *r + 1;
 	//}
     // TODO: Safe visitor counter.
-    fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>) {
+    fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>, counter: RWArc<uint>) {
         let mut stream = stream;
 		//let visitor_arc = self.visitor_arc.clone();
 		//let visitor_count = *visitor_arc.get();
@@ -197,7 +203,8 @@ impl WebServer {
             format!("{:s}{:s}<h1>Greetings, Krusty!</h1>
                      <h2>Visitor count: {:u}</h2></body></html>\r\n", 
                     HTTP_OK, COUNTER_STYLE, 
-                     unsafe {visitor_count} );
+                     //unsafe {visitor_count} );
+                    counter.read(|count|{(*count)}) );
         debug!("Responding to counter request");
         stream.write(response.as_bytes());
     }

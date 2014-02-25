@@ -18,7 +18,7 @@ extern mod extra;
 
 use std::io::*;
 use std::io::net::ip::{SocketAddr};
-use std::{os, str, libc, from_str};
+use std::{os, str, run, libc, from_str};
 use std::path::Path;
 use std::hashmap::HashMap;
 
@@ -205,6 +205,7 @@ impl WebServer {
     }
     
     // TODO: Server-side gashing.
+	// Testing with localhost:4414/index.shtml
     fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         // for now, just serve as static file
     	let mut stream = stream;
@@ -216,6 +217,9 @@ impl WebServer {
 		println!("{}", cmd_end);
 		let mut cmd = file_contents.slice(cmd_start, cmd_end);
 		println!("{}", cmd);
+		let split_cmd: ~[&str] = cmd.split('"').collect();
+		println!("{}", split_cmd[1]);
+		WebServer::run_cmd_in_gash(split_cmd[1]);
 		//let mut contents: ~[&str] = file_contents.split(' ').collect();
 		//for &x in contents.iter(){
 		//	println!("{}", x);
@@ -224,6 +228,17 @@ impl WebServer {
 		stream.write(HTTP_OK.as_bytes());
 		stream.write(file_reader.read_to_end());
     }
+	
+	fn run_cmd_in_gash(cmd: &str) {
+		let mut gash = run::Process::new("./gash", &[], run::ProcessOptions::new()).unwrap();
+		println!("{}", cmd);
+		let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();
+		println!("{}", gash_cmd.output().read_to_str());
+		gash_cmd.destroy();
+		gash.destroy();
+		//let output = process.output();
+		//println!("{}", output.read_to_str());
+	}
     
     // TODO: Smarter Scheduling.
     fn enqueue_static_file_request(stream: Option<std::io::net::tcp::TcpStream>, path_obj: &Path, stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, req_queue_arc: MutexArc<~[HTTP_Request]>, notify_chan: SharedChan<()>) {

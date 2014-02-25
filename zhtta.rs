@@ -119,10 +119,10 @@ impl WebServer {
                 // Spawn a task to handle the connection.
                 let ccounter = visitor_arc.clone();
                 spawn(proc() {
-                    WebServer::update_count(ccounter);
+                    WebServer::update_count(ccounter.clone());
                     //let mut visitor_arc = visitor_arc.clone();
 					//let mut visitor_count = visitor_arc.get();//
-					unsafe { visitor_count += 1; } // TODO: Fix unsafe counter
+					//unsafe { visitor_count += 1; } // TODO: Fix unsafe counter
                     //visitor_count += 1;
 					//WebServer::increment(*visitor_count);
 					
@@ -158,7 +158,7 @@ impl WebServer {
                              
                         if path_str == ~"./" {
                             debug!("===== Counter Page request =====");
-                            WebServer::respond_with_counter_page(stream, ccounter); //WebServer test welp
+                            WebServer::respond_with_counter_page(stream, ccounter.clone()); //WebServer test welp
                             debug!("=====Terminated connection from [{:s}].=====", peer_name);
                         } else if !path_obj.exists() || path_obj.is_dir() {
                             debug!("===== Error page request =====");
@@ -197,14 +197,16 @@ impl WebServer {
     // TODO: Safe visitor counter.
     fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>, counter: RWArc<uint>) {
         let mut stream = stream;
-		//let visitor_arc = self.visitor_arc.clone();
-		//let visitor_count = *visitor_arc.get();
+
+        debug!("Reading count");
+        let count:uint = counter.read(|count|{(return *count)});
+        debug!("Starting counter request");
         let response: ~str = 
             format!("{:s}{:s}<h1>Greetings, Krusty!</h1>
                      <h2>Visitor count: {:u}</h2></body></html>\r\n", 
                     HTTP_OK, COUNTER_STYLE, 
                      //unsafe {visitor_count} );
-                    counter.read(|count|{(*count)}) );
+                    count );
         debug!("Responding to counter request");
         stream.write(response.as_bytes());
     }

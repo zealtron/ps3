@@ -114,7 +114,7 @@ impl WebServer {
                 let stream_map_arc = stream_map_arc.clone();
 
                 // Spawn a task to handle the connection.
-                let ccounter = visitor_arc.clone();
+                let ccounter = visitor_arc.clone(); 
                 spawn(proc() {
                     WebServer::update_count(ccounter.clone()); //finished safe counter
 										
@@ -165,7 +165,7 @@ impl WebServer {
             }
         });
     }
-	
+	//use RWArc to update static variable
     fn update_count(counter: RWArc<uint>) {
      
         counter.write(|count|{*count+=1;})
@@ -179,7 +179,7 @@ impl WebServer {
         stream.write(msg.as_bytes());
     }
 
-    // finsihed: Safe visitor counter.
+    // finished: Safe visitor counter.
     fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>, counter: RWArc<uint>) {
         let mut stream = stream;
         debug!("Reading count");
@@ -215,9 +215,9 @@ impl WebServer {
 		let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
 		//println!("{}", cmd_end);
 		let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
-		//println!("{}", cmd);
+		println!("cmd {}", cmd);
 		let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
-		//println!("{}", split_cmd[1]);
+		println!("split {}", split_cmd[1]);
 		let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
 		let response: ~str =
 			format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
@@ -226,13 +226,17 @@ impl WebServer {
     }
 	//Run gash and run the command sent to it and return the output	
 	fn run_cmd_in_gash(cmd: &str) -> ~str {
-		let mut gash = run::Process::new("./gash", &[], run::ProcessOptions::new()).unwrap();
+		let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
 		//println!("{}", cmd);
-		let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
-		let s = gash_cmd.output().read_to_str();
-		//println!("{}", s);
-		gash_cmd.finish();
-		gash.destroy();
+		//let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
+		//let s = gash_cmd.output().read_to_str();
+		debug!("gash instance: {:?}", gash);
+		//gash_cmd.finish();
+		let s = gash.output().read_to_str();
+		debug!("gash output {:s}", s);
+		gash.finish();
+
+		debug!("done");
 		return s;
 		//let output = process.output();
 		//println!("{}", output.read_to_str());

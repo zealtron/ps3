@@ -36,8 +36,10 @@ impl Shell {
         loop {
             print(self.cmd_prompt);
             io::stdio::flush();
-            
-            let line = stdin.read_line().unwrap();
+
+            let fline = stdin.read_line();
+            if fline == None {println(""); continue;}
+            let line = fline.unwrap();
             let cmd_line = line.trim().to_owned();
             
             if cmd_line.len() > 0 {
@@ -262,7 +264,8 @@ fn get_cmdline_from_args() -> Option<~str> {
 
 fn main() {
     match get_cmdline_from_args() {
-        Some(cmd_line) => Shell::new("").run_cmdline(cmd_line),
+        Some(cmd_line) => {
+            Shell::new("").run_cmdline(cmd_line)},
         None           => Shell::new("gash> ").run()
     }
 }

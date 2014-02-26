@@ -18,13 +18,12 @@ extern mod extra;
 
 use std::io::*;
 use std::io::net::ip::{SocketAddr};
-use std::{os, str, libc, from_str};
+use std::{os, str, run, libc, from_str};
 use std::path::Path;
 use std::hashmap::HashMap;
 
 use extra::getopts;
 use extra::arc::MutexArc;
-use extra::arc::Arc;
 use extra::arc::RWArc;
 
 static SERVER_NAME : &'static str = "Zhtta Version 0.5";
@@ -205,25 +204,39 @@ impl WebServer {
     }
     
     // TODO: Server-side gashing.
+	// Testing with localhost:4414/index.shtml
     fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         // for now, just serve as static file
     	let mut stream = stream;
 		let mut file_reader = File::open(path).expect("Invalid file!");
-		let mut file_contents = file_reader.read_to_str();
-		let cmd_start = file_contents.find_str("<!--#exec cmd=").unwrap();
-		println!("{}", cmd_start);
-		let mut cmd_end = file_contents.find_str("-->").unwrap() + 3;
-		println!("{}", cmd_end);
-		let mut cmd = file_contents.slice(cmd_start, cmd_end);
-		println!("{}", cmd);
-		//let mut contents: ~[&str] = file_contents.split(' ').collect();
-		//for &x in contents.iter(){
-		//	println!("{}", x);
-		//}
-		//WebServer::respond_with_static_file(stream, path);
-		stream.write(HTTP_OK.as_bytes());
-		stream.write(file_reader.read_to_end());
+		let file_contents = file_reader.read_to_str();
+		let cmd_start = file_contents.find_str("<!--#exec cmd=").unwrap(); //find start of command
+		//println!("{}", cmd_start);
+		let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
+		//println!("{}", cmd_end);
+		let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
+		//println!("{}", cmd);
+		let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
+		//println!("{}", split_cmd[1]);
+		let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
+		let response: ~str =
+			format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
+		//println!("date = {}", gash_output);
+		stream.write(response.as_bytes());
     }
+	//Run gash and run the command sent to it and return the output	
+	fn run_cmd_in_gash(cmd: &str) -> ~str {
+		let mut gash = run::Process::new("./gash", &[], run::ProcessOptions::new()).unwrap();
+		//println!("{}", cmd);
+		let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
+		let s = gash_cmd.output().read_to_str();
+		//println!("{}", s);
+		gash_cmd.finish();
+		gash.destroy();
+		return s;
+		//let output = process.output();
+		//println!("{}", output.read_to_str());
+	}
     
     // TODO: Smarter Scheduling.
     fn enqueue_static_file_request(stream: Option<std::io::net::tcp::TcpStream>, path_obj: &Path, stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, req_queue_arc: MutexArc<~[HTTP_Request]>, notify_chan: SharedChan<()>) {

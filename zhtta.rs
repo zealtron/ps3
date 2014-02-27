@@ -57,7 +57,7 @@ struct WebServer {
     port: uint,
     www_dir_path: ~Path,
     
-	visitor_arc: RWArc<uint>,
+    visitor_arc: RWArc<uint>,
 
     request_queue_arc: MutexArc<~[HTTP_Request]>,
     stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
@@ -77,7 +77,7 @@ impl WebServer {
             port: port,
             www_dir_path: www_dir_path,     
 
-			visitor_arc: RWArc::new(0u),
+    	    visitor_arc: RWArc::new(0u),
 			           
             request_queue_arc: MutexArc::new(~[]),
             stream_map_arc: MutexArc::new(HashMap::new()),
@@ -118,7 +118,7 @@ impl WebServer {
                 spawn(proc() {
                     WebServer::update_count(ccounter.clone()); //finished safe counter
 										
-					let request_queue_arc = queue_port.recv();
+		    let request_queue_arc = queue_port.recv();
                   
                     let mut stream = stream;
                     
@@ -194,56 +194,57 @@ impl WebServer {
         stream.write(response.as_bytes());
     }
     
-    // TODO: Streaming file.
+    // FINISHED: Streaming file.
     // TODO: Application-layer file caching.
     fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         let mut stream = stream;
         let mut file_reader = File::open(path).expect("Invalid file!");
-		let mut file_iter = file_reader.bytes();
-		for b in file_iter {
-			stream.write_u8(b);
-		}	
+	//Return an iterator that reads the bytes one by one until EoF
+	let mut file_iter = file_reader.bytes();
+	for b in file_iter {
+	    stream.write_u8(b);
+	}	
         //stream.write(HTTP_OK.as_bytes());
         //stream.write(file_reader.read_to_end());
     }
     
     // finished: Server-side gashing.
-	// Testing with localhost:4414/index.shtml
+    // Testing with localhost:4414/index.shtml
     fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         // for now, just serve as static file
     	let mut stream = stream;
-		let mut file_reader = File::open(path).expect("Invalid file!");
-		let file_contents = file_reader.read_to_str();
-		let cmd_start = file_contents.find_str("<!--#exec cmd=").unwrap(); //find start of command
-		//println!("{}", cmd_start);
-		let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
-		//println!("{}", cmd_end);
-		let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
-		//println!("cmd {}", cmd);
-		let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
-		//println!("split {}", split_cmd[1]);
-		let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
-		let response: ~str =
-			format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
-		//println!("date = {}", gash_output);
-		stream.write(response.as_bytes());
+	let mut file_reader = File::open(path).expect("Invalid file!");
+	let file_contents = file_reader.read_to_str();
+	let cmd_start = file_contents.find_str("<!--#exec cmd=").unwrap(); //find start of command
+	//println!("{}", cmd_start);
+	let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
+	//println!("{}", cmd_end);
+	let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
+	//println!("cmd {}", cmd);
+	let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
+	//println!("split {}", split_cmd[1]);
+	let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
+	let response: ~str =
+		format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
+	//println!("date = {}", gash_output);
+	stream.write(response.as_bytes());
     }
 	//Run gash and run the command sent to it and return the output	
 	fn run_cmd_in_gash(cmd: &str) -> ~str {
-		let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
-		//println!("{}", cmd);
-		//let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
-		//let s = gash_cmd.output().read_to_str();
-		debug!("gash instance: {:?}", gash);
-		//gash_cmd.finish();
-		let s = gash.output().read_to_str();
-		debug!("gash output {:s}", s);
-		gash.finish();
+ 	    let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
+	    //println!("{}", cmd);
+	    //let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
+	    //let s = gash_cmd.output().read_to_str();
+	    debug!("gash instance: {:?}", gash);
+	    //gash_cmd.finish();
+	    let s = gash.output().read_to_str();
+	    debug!("gash output {:s}", s);
+	    gash.finish();
 
-		debug!("done");
-		return s;
-		//let output = process.output();
-		//println!("{}", output.read_to_str());
+	    debug!("done");
+	    return s;
+	    //let output = process.output();
+	    //println!("{}", output.read_to_str());
 	}
     
     // TODO: Smarter Scheduling.

@@ -199,8 +199,12 @@ impl WebServer {
     fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         let mut stream = stream;
         let mut file_reader = File::open(path).expect("Invalid file!");
-        stream.write(HTTP_OK.as_bytes());
-        stream.write(file_reader.read_to_end());
+		let mut file_iter = file_reader.bytes();
+		for b in file_iter {
+			stream.write_u8(b);
+		}	
+        //stream.write(HTTP_OK.as_bytes());
+        //stream.write(file_reader.read_to_end());
     }
     
     // finished: Server-side gashing.

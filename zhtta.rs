@@ -203,7 +203,7 @@ impl WebServer {
         stream.write(file_reader.read_to_end());
     }
     
-    // TODO: Server-side gashing.
+    // finished: Server-side gashing.
 	// Testing with localhost:4414/index.shtml
     fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         // for now, just serve as static file
@@ -215,9 +215,9 @@ impl WebServer {
 		let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
 		//println!("{}", cmd_end);
 		let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
-		println!("cmd {}", cmd);
+		//println!("cmd {}", cmd);
 		let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
-		println!("split {}", split_cmd[1]);
+		//println!("split {}", split_cmd[1]);
 		let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
 		let response: ~str =
 			format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	

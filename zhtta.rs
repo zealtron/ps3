@@ -99,7 +99,7 @@ impl WebServer {
         let request_queue_arc = self.request_queue_arc.clone();
         let shared_notify_chan = self.shared_notify_chan.clone();
         let stream_map_arc = self.stream_map_arc.clone();
-		let visitor_arc = self.visitor_arc.clone();        
+	let visitor_arc = self.visitor_arc.clone();        
         
         spawn(proc() {
             let mut acceptor = net::tcp::TcpListener::bind(addr).listen();
@@ -266,7 +266,14 @@ impl WebServer {
         req_queue_arc.access(|local_req_queue| {
             debug!("Got queue mutex lock.");
             let req: HTTP_Request = req_port.recv();
-            local_req_queue.push(req);
+	    let req_ip = req.peer_name.clone();
+	    let sub_1 = req_ip.slice(0, 8).to_owned();
+	    let sub_2 = req_ip.slice(0, 7).to_owned();
+	    if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) {
+		local_req_queue.insert(0, req);
+	    } else {
+            	local_req_queue.push(req);
+	    }
             debug!("A new request enqueued, now the length of queue is {:u}.", local_req_queue.len());
         });
         

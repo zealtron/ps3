@@ -99,7 +99,7 @@ impl WebServer {
         let request_queue_arc = self.request_queue_arc.clone();
         let shared_notify_chan = self.shared_notify_chan.clone();
         let stream_map_arc = self.stream_map_arc.clone();
-		let visitor_arc = self.visitor_arc.clone();        
+	let visitor_arc = self.visitor_arc.clone();        
         
         spawn(proc() {
             let mut acceptor = net::tcp::TcpListener::bind(addr).listen();
@@ -165,16 +165,14 @@ impl WebServer {
             }
         });
     }
-	//use RWArc to update static variable
-    fn update_count(counter: RWArc<uint>) {
-     
+    //use RWArc to update static variable
+    fn update_count(counter: RWArc<uint>) { 
         counter.write(|count|{*count+=1;})
     }
 
     fn respond_with_error_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         let mut stream = stream;
         let msg: ~str = format!("Cannot open: {:s}", path.as_str().expect("invalid path").to_owned());
-
         stream.write(HTTP_BAD.as_bytes());
         stream.write(msg.as_bytes());
     }
@@ -229,25 +227,25 @@ impl WebServer {
 	//println!("date = {}", gash_output);
 	stream.write(response.as_bytes());
     }
-	//Run gash and run the command sent to it and return the output	
-	fn run_cmd_in_gash(cmd: &str) -> ~str {
- 	    let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
-	    //println!("{}", cmd);
-	    //let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
-	    //let s = gash_cmd.output().read_to_str();
-	    debug!("gash instance: {:?}", gash);
-	    //gash_cmd.finish();
-	    let s = gash.output().read_to_str();
-	    debug!("gash output {:s}", s);
-	    gash.finish();
-
-	    debug!("done");
-	    return s;
-	    //let output = process.output();
-	    //println!("{}", output.read_to_str());
-	}
+    //Run gash and run the command sent to it and return the output	
+    fn run_cmd_in_gash(cmd: &str) -> ~str {
+        let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
+	//println!("{}", cmd);
+	//let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
+	//let s = gash_cmd.output().read_to_str();
+	debug!("gash instance: {:?}", gash);
+	//gash_cmd.finish();
+	let s = gash.output().read_to_str();
+	debug!("gash output {:s}", s);
+	gash.finish();
+	debug!("done");
+	return s;
+	//let output = process.output();
+	//println!("{}", output.read_to_str());
+    }
     
     // TODO: Smarter Scheduling.
+    // Finished: Wahoo-first scheduling
     fn enqueue_static_file_request(stream: Option<std::io::net::tcp::TcpStream>, path_obj: &Path, stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, req_queue_arc: MutexArc<~[HTTP_Request]>, notify_chan: SharedChan<()>) {
         // Save stream in hashmap for later response.
         let mut stream = stream;
@@ -271,7 +269,14 @@ impl WebServer {
         req_queue_arc.access(|local_req_queue| {
             debug!("Got queue mutex lock.");
             let req: HTTP_Request = req_port.recv();
-            local_req_queue.push(req);
+	    let req_ip = req.peer_name.clone();
+	    let sub_1 = req_ip.slice(0, 8).to_owned();
+	    let sub_2 = req_ip.slice(0, 7).to_owned();
+	    if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) {
+		local_req_queue.insert(0, req);
+	    } else {
+            	local_req_queue.push(req);
+	    }
             debug!("A new request enqueued, now the length of queue is {:u}.", local_req_queue.len());
         });
         

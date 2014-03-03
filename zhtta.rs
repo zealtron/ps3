@@ -25,6 +25,7 @@ use std::hashmap::HashMap;
 use extra::getopts;
 use extra::arc::MutexArc;
 use extra::arc::RWArc;
+use extra::sync::Semaphore;
 
 static SERVER_NAME : &'static str = "Zhtta Version 0.5";
 
@@ -64,6 +65,8 @@ struct WebServer {
     
     notify_port: Port<()>,
     shared_notify_chan: SharedChan<()>,
+
+    tasks: int,
 }
 
 impl WebServer {
@@ -84,6 +87,8 @@ impl WebServer {
             
             notify_port: notify_port,
             shared_notify_chan: shared_notify_chan,        
+
+            tasks: 4,
         }
     }
     
@@ -289,10 +294,51 @@ impl WebServer {
     fn dequeue_static_file_request(&mut self) {
         let req_queue_get = self.request_queue_arc.clone();
         let stream_map_get = self.stream_map_arc.clone();
-        
+        let sem = Semaphore::new(1);     
         // Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
         
         let (request_port, request_chan) = Chan::new();
+        let port = MutexArc::new(request_port);
+
+        for i in range(0, self.tasks) {
+            //request_port = request_port.clone();
+            let stream_map_get = stream_map_get.clone();
+            //let request_port = request_port.clone();
+            let sem = sem.clone();
+            let port = port.clone();
+            let name = i.clone();
+            debug!("Starting task {:?}", name)
+            spawn( proc() {
+            let name = name.clone();
+            loop {
+                unsafe{
+                debug!("Task {:?} waiting", name)
+                sem.acquire();
+                debug!("Task {:?} get", name)
+                //let request: HTTP_Request = request_port.recv();
+                let request: HTTP_Request = port.unsafe_access(|req| {let r: HTTP_Request =(*req).recv(); r});
+                sem.release();
+                debug!("Task {:?} release", name)
+
+                
+                // Get stream from hashmap.
+                // Use unsafe method, because TcpStream in Rust 0.9 doesn't have "Freeze" bound.
+                let (stream_port, stream_chan) = Chan::new();
+                stream_map_get.unsafe_access(|local_stream_map| {
+                    let stream = local_stream_map.pop(&request.peer_name).expect("no option tcpstream");
+                    stream_chan.send(stream);
+                });
+                
+                // TODO: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
+                let stream = stream_port.recv();
+                WebServer::respond_with_static_file(stream, request.path);
+                // Close stream automatically.
+                debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
+                }
+            }
+            }
+            );
+        }
         loop {
             self.notify_port.recv();    // waiting for new request enqueued.
             
@@ -305,25 +351,8 @@ impl WebServer {
                     }
                 }
             });
-            
-            let request = request_port.recv();
-            
-            // Get stream from hashmap.
-            // Use unsafe method, because TcpStream in Rust 0.9 doesn't have "Freeze" bound.
-            let (stream_port, stream_chan) = Chan::new();
-            unsafe {
-                stream_map_get.unsafe_access(|local_stream_map| {
-                    let stream = local_stream_map.pop(&request.peer_name).expect("no option tcpstream");
-                    stream_chan.send(stream);
-                });
-            }
-            
-            // TODO: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
-            let stream = stream_port.recv();
-            WebServer::respond_with_static_file(stream, request.path);
-            // Close stream automatically.
-            debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
         }
+    
     }
     
     fn get_peer_name(stream: &mut Option<std::io::net::tcp::TcpStream>) -> ~str {

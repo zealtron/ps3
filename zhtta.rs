@@ -74,6 +74,10 @@ impl WebServer {
         let (notify_port, shared_notify_chan) = SharedChan::new();
         let www_dir_path = ~Path::new(www_dir);
         os::change_dir(www_dir_path.clone());
+        let num: int = match from_str(WebServer::run_cmd_in_gash("nproc")) {
+                  Some(i)=>i,
+                  None=>1,
+        };
 		
         WebServer {
             ip: ip.to_owned(),
@@ -88,7 +92,7 @@ impl WebServer {
             notify_port: notify_port,
             shared_notify_chan: shared_notify_chan,        
 
-            tasks: 4,
+            tasks:num,
         }
     }
     

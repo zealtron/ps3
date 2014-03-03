@@ -52,6 +52,14 @@ struct HTTP_Request {
     peer_name: ~str,
     path: ~Path,
 }
+impl HTTP_Request {
+    fn clone(&self) -> HTTP_Request {
+        HTTP_Request {
+            peer_name:self.peer_name.clone(),
+            path:self.path.clone(),
+        }
+    }
+}
 
 struct WebServer {
     ip: ~str,
@@ -74,10 +82,15 @@ impl WebServer {
         let (notify_port, shared_notify_chan) = SharedChan::new();
         let www_dir_path = ~Path::new(www_dir);
         os::change_dir(www_dir_path.clone());
-        let num: int = match from_str(WebServer::run_cmd_in_gash("nproc")) {
-                  Some(i)=>i,
+        let num_str = WebServer::run_cmd_in_gash("nproc");
+        let trimmed = num_str.trim();
+        let num: int = match from_str::<int>(trimmed) {
+                  Some(i) if i > 0 => {debug!("found {:?} cores",i); i},
+                  Some(_) => 1,
                   None=>1,
         };
+        
+
 		
         WebServer {
             ip: ip.to_owned(),
@@ -92,7 +105,7 @@ impl WebServer {
             notify_port: notify_port,
             shared_notify_chan: shared_notify_chan,        
 
-            tasks:num,
+            tasks:num.clone(),
         }
     }
     
@@ -303,7 +316,11 @@ impl WebServer {
         
         let (request_port, request_chan) = Chan::new();
         let port = MutexArc::new(request_port);
-
+        
+        //Will allow for creating the same number of tasks as we have cores
+        //Allows for the downloading of multiple different files at the same time
+        //If it is the same file, it won't work
+        debug!("Creating {:?} tasks", self.tasks);
         for i in range(0, self.tasks) {
             //request_port = request_port.clone();
             let stream_map_get = stream_map_get.clone();
@@ -313,45 +330,46 @@ impl WebServer {
             let name = i.clone();
             debug!("Starting task {:?}", name)
             spawn( proc() {
-            let name = name.clone();
-            loop {
-                unsafe{
-                debug!("Task {:?} waiting", name)
-                sem.acquire();
-                debug!("Task {:?} get", name)
-                //let request: HTTP_Request = request_port.recv();
-                let request: HTTP_Request = port.unsafe_access(|req| {let r: HTTP_Request =(*req).recv(); r});
-                sem.release();
-                debug!("Task {:?} release", name)
+                let name = name.clone();
+                loop {
+                    unsafe{
+                    debug!("Task {:?} waiting", name)
+                    sem.acquire();
+                    debug!("Task {:?} get", name)
+                    //let request: HTTP_Request = request_port.recv();
+                    let request: HTTP_Request = port.unsafe_access(|req| {let r: HTTP_Request =(*req).recv(); r.clone()});
+                    sem.release();
+                    debug!("Task {:?} release", name)
 
-                
-                // Get stream from hashmap.
-                // Use unsafe method, because TcpStream in Rust 0.9 doesn't have "Freeze" bound.
-                let (stream_port, stream_chan) = Chan::new();
-                stream_map_get.unsafe_access(|local_stream_map| {
-                    let stream = local_stream_map.pop(&request.peer_name).expect("no option tcpstream");
-                    stream_chan.send(stream);
-                });
-                
-                // TODO: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
-                let stream = stream_port.recv();
-                WebServer::respond_with_static_file(stream, request.path);
-                // Close stream automatically.
-                debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
+                    
+                    // Get stream from hashmap.
+                    // Use unsafe method, because TcpStream in Rust 0.9 doesn't have "Freeze" bound.
+                    let (stream_port, stream_chan) = Chan::new();
+                    stream_map_get.unsafe_access(|local_stream_map| {
+                        let stream = local_stream_map.pop(&request.peer_name).expect("no option tcpstream");
+                        stream_chan.send(stream);
+                    });
+                    
+                    let stream = stream_port.recv();
+                    WebServer::respond_with_static_file(stream, request.path);
+                    // Close stream automatically.
+                    debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
+                    }
                 }
-            }
             }
             );
         }
+        let mut total = 0;
         loop {
             self.notify_port.recv();    // waiting for new request enqueued.
+            total = total + 1;
             
             req_queue_get.access( |req_queue| {
                 match req_queue.shift_opt() { // FIFO queue.
                     None => { /* do nothing */ }
                     Some(req) => {
                         request_chan.send(req);
-                        debug!("A new request dequeued, now the length of queue is {:u}.", req_queue.len());
+                        debug!("A new request dequeued, now the length of queue is {:u}, {:?} served.", req_queue.len(), total);
                     }
                 }
             });

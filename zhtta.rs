@@ -18,7 +18,7 @@ extern mod extra;
 
 use std::io::*;
 use std::io::net::ip::{SocketAddr};
-use std::{os, str, run, libc, from_str};
+use std::{os, str, run, libc, from_str, mem};
 use std::path::Path;
 use std::hashmap::HashMap;
 
@@ -45,16 +45,16 @@ static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, 
              <body>";
 
 struct Page {
-    name: ~str,
+    //name: ~str,
     data: ~str,
     accesses: int,
     last_access: Timespec,
 }
 
 impl Page {
-    fn new(_name: ~str, _data: ~str) -> Page{
+    fn new(_data: ~str) -> Page{
         Page {
-            name: _name,
+            //name: _name,
             data: _data,
             accesses: 0,
             last_access: get_time(),
@@ -65,49 +65,72 @@ impl Page {
         self.last_access = get_time();
     }
 }
-impl Eq for Page {
-    //equal if names are the same
-    fn eq(&self, other: &Page) -> bool {
-        self.name == other.name
-    }
-    fn ne(&self, other: &Page) -> bool {
-        self.name != other.name
-    }
-}
 struct Cache {
     max_size: int,
     current_size: int,
-    files: ~[Page],
+    files: HashMap<~str, Page>,
 }
 impl Cache {
-    fn new(msize: int, current_size: int) -> Cache {
+    fn new(msize: int) -> Cache {
         Cache {
             max_size: msize,
             current_size: 0,
-            files: ~[],
+            files: HashMap::new(),
         }
-    }
-    fn inside(&self, name: ~str) -> Option<int> {
-        for i in range(0,self.files.len()) {
-            if self.files[i].name == name {
-                return Some(i as int);
-            }
-        }
-        None
     }
 //maybe only access if it exists, and then write it instead of trying to transfer the string
 //or maybe pop the Page, use it, and then reinsert it because of caching algorithm
-    fn access(&self, name: ~str) -> Option<~~str> {
-        for i in range(0,self.files.len()) {
-            let ref page = self.files[i];
-            if page.name == name {
-                page.update();
-                return Some(~page.name);
+    fn get_files(~self) -> HashMap<~str, Page> {
+        (self.files)
+    }
+    fn get(&mut self, path:~str, mut stream:std::io::net::tcp::TcpStream) {
+        let p: &mut Page = self.files.get_mut(&path);
+        p.update();
+        stream.write(p.data.as_bytes()) ;
+        
+    }
+    fn load(&mut self, _path:~str, _data: ~str){
+        let p = Page::new(_data);
+        let psize = mem::size_of_val(&p) as int;
+        if psize < self.max_size {
+            if self.current_size + psize > self.max_size {
+                debug!("Cache is full!");
+                while self.current_size + psize > self.max_size && !self.files.is_empty() {
+                    self.remove_oldest();
+                }
+                    
+            }
+            debug!("Inserting {:?} into cache", _path);
+            self.files.insert(_path, p);
+        }
+    }
+    fn remove_oldest(&mut self) {
+        if self.files.len() <= 0 {return}
+        let mut o_key:~str = ~"";
+        let mut o_val:Timespec= get_time();
+        for (key, val) in self.files.iter() {
+            if val.last_access < o_val {
+                o_val = val.last_access.clone();
+                o_key = key.clone();
             }
         }
-        None
+        if o_key != ~"" {
+            let v = self.files.pop(&o_key);
+            self.current_size = self.current_size - mem::size_of_val(&v) as int;
+        }
     }
+
+
+
 }
+
+//if cache.access().contains_key(request.path){
+//    stream(cache.access().get(request.path));
+//}
+//else {
+//    let f = normal_load_and_stream(request.path);
+//    cache.load(request.path, f);
+//}
 
 struct HTTP_Request {
     // Use peer_name as the key to access TcpStream in hashmap. 
@@ -284,13 +307,13 @@ impl WebServer {
     fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         let mut stream = stream;
         let mut file_reader = File::open(path).expect("Invalid file!");
-	//Return an iterator that reads the bytes one by one until EoF
-	let mut file_iter = file_reader.bytes();
-	for b in file_iter {
-	    stream.write_u8(b);
-	}	
-        //stream.write(HTTP_OK.as_bytes());
-        //stream.write(file_reader.read_to_end());
+        //Return an iterator that reads the bytes one by one until EoF
+        let mut file_iter = file_reader.bytes();
+        for b in file_iter {
+            stream.write_u8(b);
+        }	
+            //stream.write(HTTP_OK.as_bytes());
+            //stream.write(file_reader.read_to_end());
     }
     
     // finished: Server-side gashing.
@@ -298,37 +321,26 @@ impl WebServer {
     fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         // for now, just serve as static file
     	let mut stream = stream;
-	let mut file_reader = File::open(path).expect("Invalid file!");
-	let file_contents = file_reader.read_to_str();
-	let cmd_start = file_contents.find_str("<!--#exec cmd=").unwrap(); //find start of command
-	//println!("{}", cmd_start);
-	let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
-	//println!("{}", cmd_end);
-	let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
-	//println!("cmd {}", cmd);
-	let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
-	//println!("split {}", split_cmd[1]);
-	let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
-	let response: ~str =
-		format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
-	//println!("date = {}", gash_output);
-	stream.write(response.as_bytes());
-    }
-    //Run gash and run the command sent to it and return the output	
+        let mut file_reader = File::open(path).expect("Invalid file!");
+        let file_contents = file_reader.read_to_str();
+        let cmd_start = file_contents.find_str("<!--#exec cmd=").unwrap(); //find start of command
+        let cmd_end = file_contents.find_str("-->").unwrap() + 3; //find end of command
+        let cmd = file_contents.slice(cmd_start, cmd_end); //slice the command out
+        let split_cmd: ~[&str] = cmd.split('"').collect(); //parse command for the gash command
+        let gash_output: ~str = WebServer::run_cmd_in_gash(split_cmd[1]);
+        let response: ~str =
+            format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
+        stream.write(response.as_bytes());
+        }
+        //Run gash and run the command sent to it and return the output	
     fn run_cmd_in_gash(cmd: &str) -> ~str {
         let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
-	//println!("{}", cmd);
-	//let mut gash_cmd = run::Process::new(cmd, &[], run::ProcessOptions::new()).unwrap();	
-	//let s = gash_cmd.output().read_to_str();
-	debug!("gash instance: {:?}", gash);
-	//gash_cmd.finish();
-	let s = gash.output().read_to_str();
-	debug!("gash output {:s}", s);
-	gash.finish();
-	debug!("done");
-	return s;
-	//let output = process.output();
-	//println!("{}", output.read_to_str());
+        debug!("gash instance: {:?}", gash);
+        let s = gash.output().read_to_str();
+        debug!("gash output {:s}", s);
+        gash.finish();
+        debug!("done");
+        return s;
     }
     
     // TODO: Smarter Scheduling.

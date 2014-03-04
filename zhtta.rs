@@ -294,11 +294,30 @@ impl WebServer {
 	    let req_ip = req.peer_name.clone();
 	    let sub_1 = req_ip.slice(0, 8).to_owned();
 	    let sub_2 = req_ip.slice(0, 7).to_owned();
-	    if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) {
-		local_req_queue.insert(0, req);
-	    } else {
-            	local_req_queue.push(req);
+
+	    for i in range(0, local_req_queue.len() - 1) {
+		let comp_ip = local_req_queue[i].peer_name.clone();
+	        let comp_1 = comp_ip.slice(0, 8).to_owned();
+	        let comp_2 = comp_ip.slice(0, 7).to_owned();
+	    	if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
+			local_req_queue.insert(i, req);
+			break;
+		} else if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && (str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) || !(str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
+			let comp_path = req.path.clone();
+			let comp_size = comp_path.stat().size;
+			let req_path = req.path.clone();
+			let req_size = req_path.stat().size;
+			if req_size < comp_size {
+				local_req_queue.insert(i, req);
+				break;
+			}
+		} else if i == (local_req_queue.len() - 1) {
+			local_req_queue.push(req);
+			break;
+		}
 	    }
+
+
             debug!("A new request enqueued, now the length of queue is {:u}.", local_req_queue.len());
         });
         

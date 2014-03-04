@@ -27,6 +27,7 @@ use extra::arc::MutexArc;
 use extra::arc::RWArc;
 use extra::sync::Semaphore;
 
+use extra::time::{get_time, Timespec};
 static SERVER_NAME : &'static str = "Zhtta Version 0.5";
 
 static IP : &'static str = "127.0.0.1";
@@ -43,6 +44,70 @@ static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, 
              </style></head>
              <body>";
 
+struct Page {
+    name: ~str,
+    data: ~str,
+    accesses: int,
+    last_access: Timespec,
+}
+
+impl Page {
+    fn new(_name: ~str, _data: ~str) -> Page{
+        Page {
+            name: _name,
+            data: _data,
+            accesses: 0,
+            last_access: get_time(),
+        }
+    }
+    fn update(&mut self) {
+        self.accesses = self.accesses+1;
+        self.last_access = get_time();
+    }
+}
+impl Eq for Page {
+    //equal if names are the same
+    fn eq(&self, other: &Page) -> bool {
+        self.name == other.name
+    }
+    fn ne(&self, other: &Page) -> bool {
+        self.name != other.name
+    }
+}
+struct Cache {
+    max_size: int,
+    current_size: int,
+    files: ~[Page],
+}
+impl Cache {
+    fn new(msize: int, current_size: int) -> Cache {
+        Cache {
+            max_size: msize,
+            current_size: 0,
+            files: ~[],
+        }
+    }
+    fn inside(&self, name: ~str) -> Option<int> {
+        for i in range(0,self.files.len()) {
+            if self.files[i].name == name {
+                return Some(i as int);
+            }
+        }
+        None
+    }
+//maybe only access if it exists, and then write it instead of trying to transfer the string
+//or maybe pop the Page, use it, and then reinsert it because of caching algorithm
+    fn access(&self, name: ~str) -> Option<~~str> {
+        for i in range(0,self.files.len()) {
+            let ref page = self.files[i];
+            if page.name == name {
+                page.update();
+                return Some(~page.name);
+            }
+        }
+        None
+    }
+}
 
 struct HTTP_Request {
     // Use peer_name as the key to access TcpStream in hashmap. 

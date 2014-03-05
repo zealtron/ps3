@@ -45,16 +45,16 @@ static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, 
              <body>";
 
 struct Page {
-    //name: ~str,
+    size: u64,
     data: ~str,
     accesses: int,
     last_access: Timespec,
 }
 
 impl Page {
-    fn new(_data: ~str) -> Page{
+    fn new(_size:u64, _data: ~str) -> Page{
         Page {
-            //name: _name,
+            size: _size,
             data: _data,
             accesses: 0,
             last_access: get_time(),
@@ -66,20 +66,20 @@ impl Page {
     }
 }
 struct Cache {
-    max_size: int,
-    current_size: int,
+    max_size: u64,
+    current_size: u64,
     files: HashMap<~str, Page>,
 }
 impl Cache {
-    fn new(msize: int) -> Cache {
+    fn new(msize: u64) -> Cache {
         Cache {
             max_size: msize,
             current_size: 0,
             files: HashMap::new(),
         }
     }
-//maybe only access if it exists, and then write it instead of trying to transfer the string
-//or maybe pop the Page, use it, and then reinsert it because of caching algorithm
+    //maybe only access if it exists, and then write it instead of trying to transfer the string
+    //or maybe pop the Page, use it, and then reinsert it because of caching algorithm
     fn get_files(~self) -> HashMap<~str, Page> {
         (self.files)
     }
@@ -89,19 +89,22 @@ impl Cache {
         stream.write(p.data.as_bytes()) ;
         
     }
-    fn load(&mut self, _path:~str, _data: ~str){
-        let p = Page::new(_data);
-        let psize = mem::size_of_val(&p) as int;
+    fn load(&mut self, _path:~Path, _data: ~str){
+        let p = Page::new(_path.stat().size, _data);
+        let psize =_path.stat().size;
+        //as long as the file is less than the size of the cache
         if psize < self.max_size {
+            //if the size of the cache would be over the limit
             if self.current_size + psize > self.max_size {
                 debug!("Cache is full!");
+                //remove oldest stuff until you have room
                 while self.current_size + psize > self.max_size && !self.files.is_empty() {
                     self.remove_oldest();
                 }
-                    
             }
+            //insert file
             debug!("Inserting {:?} into cache", _path);
-            self.files.insert(_path, p);
+            self.files.insert(_path.filename_str().unwrap().to_owned(), p);
         }
     }
     fn remove_oldest(&mut self) {
@@ -115,8 +118,8 @@ impl Cache {
             }
         }
         if o_key != ~"" {
-            let v = self.files.pop(&o_key);
-            self.current_size = self.current_size - mem::size_of_val(&v) as int;
+            let v = self.files.pop(&o_key).unwrap();
+            self.current_size = self.current_size - v.size;
         }
     }
 
@@ -366,36 +369,38 @@ impl WebServer {
 
         debug!("Waiting for queue mutex lock.");
         req_queue_arc.access(|local_req_queue| {
-            debug!("Got queue mutex lock.");
-            let req: HTTP_Request = req_port.recv();
+        debug!("Got queue mutex lock.");
+        let req: HTTP_Request = req_port.recv();
 	    let req_ip = req.peer_name.clone();
 	    let sub_1 = req_ip.slice(0, 8).to_owned();
 	    let sub_2 = req_ip.slice(0, 7).to_owned();
 
 	    for i in range(0, local_req_queue.len() - 1) {
-		let comp_ip = local_req_queue[i].peer_name.clone();
-	        let comp_1 = comp_ip.slice(0, 8).to_owned();
-	        let comp_2 = comp_ip.slice(0, 7).to_owned();
-	    	if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
-			local_req_queue.insert(i, req);
-			break;
-		} else if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && (str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) || !(str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
-			let comp_path = req.path.clone();
-			let comp_size = comp_path.stat().size;
-			let req_path = req.path.clone();
-			let req_size = req_path.stat().size;
-			if req_size < comp_size {
-				local_req_queue.insert(i, req);
-				break;
-			}
-		} else if i == (local_req_queue.len() - 1) {
-			local_req_queue.push(req);
-			break;
-		}
+            let comp_ip = local_req_queue[i].peer_name.clone();
+                let comp_1 = comp_ip.slice(0, 8).to_owned();
+                let comp_2 = comp_ip.slice(0, 7).to_owned();
+                if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
+                    local_req_queue.insert(i, req);
+                    break;
+                }
+                else if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && (str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) || !(str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
+                    let comp_path = req.path.clone();
+                    let comp_size = comp_path.stat().size;
+                    let req_path = req.path.clone();
+                    let req_size = req_path.stat().size;
+                    if req_size < comp_size {
+                        local_req_queue.insert(i, req);
+                        break;
+                    }
+                } 
+                else if i == (local_req_queue.len() - 1) {
+                    local_req_queue.push(req);
+                    break;
+                }
 	    }
 
 
-            debug!("A new request enqueued, now the length of queue is {:u}.", local_req_queue.len());
+        debug!("A new request enqueued, now the length of queue is {:u}.", local_req_queue.len());
         });
         
         notify_chan.send(()); // Send incoming notification to responder task.

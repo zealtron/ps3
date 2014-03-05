@@ -17,8 +17,10 @@
 extern mod extra;
 
 use std::io::*;
+use std::io::mem::MemWriter;
 use std::io::net::ip::{SocketAddr};
 use std::{os, str, run, libc, from_str, mem};
+use std::num::from_u8;
 use std::path::Path;
 use std::hashmap::HashMap;
 
@@ -87,7 +89,9 @@ impl Cache {
         let p: &mut Page = self.files.get_mut(&path);
         p.update();
         stream.write(p.data.as_bytes()) ;
-        
+    }
+    fn contains(&self, req: &HTTP_Request)->bool {
+        self.files.contains_key(&(req.path.filename_str().unwrap().to_owned()))
     }
     fn load(&mut self, _path:~Path, _data: ~str){
         let p = Page::new(_path.stat().size, _data);
@@ -176,9 +180,9 @@ impl WebServer {
         let num_str = WebServer::run_cmd_in_gash("nproc");
         let trimmed = num_str.trim();
         let num: int = match from_str::<int>(trimmed) {
-                  Some(i) if i > 0 => {debug!("found {:?} cores",i); i},
-                  Some(_) => 1,
-                  None=>1,
+            Some(i) if i > 0 => {debug!("found {:?} cores",i); i},
+            Some(_) => 1,
+            None=>1,
         };
         
 
@@ -208,21 +212,21 @@ impl WebServer {
     fn listen(&mut self) {
         let addr = from_str::<SocketAddr>(format!("{:s}:{:u}", self.ip, self.port)).expect("Address error.");
         let www_dir_path_str = self.www_dir_path.as_str().expect("invalid www path?").to_owned();
-        
+
         let request_queue_arc = self.request_queue_arc.clone();
         let shared_notify_chan = self.shared_notify_chan.clone();
         let stream_map_arc = self.stream_map_arc.clone();
-	let visitor_arc = self.visitor_arc.clone();        
-        
+        let visitor_arc = self.visitor_arc.clone();        
+
         spawn(proc() {
             let mut acceptor = net::tcp::TcpListener::bind(addr).listen();
             println!("{:s} listening on {:s} (serving from: {:s}).", 
                      SERVER_NAME, addr.to_str(), www_dir_path_str);
-            
+
             for stream in acceptor.incoming() {
                 let (queue_port, queue_chan) = Chan::new();
                 queue_chan.send(request_queue_arc.clone());
-                
+
                 let notify_chan = shared_notify_chan.clone();
                 let stream_map_arc = stream_map_arc.clone();
 
@@ -230,33 +234,33 @@ impl WebServer {
                 let ccounter = visitor_arc.clone(); 
                 spawn(proc() {
                     WebServer::update_count(ccounter.clone()); //finished safe counter
-										
-		    let request_queue_arc = queue_port.recv();
-                  
+
+                    let request_queue_arc = queue_port.recv();
+
                     let mut stream = stream;
-                    
+
                     let peer_name = WebServer::get_peer_name(&mut stream);
-                    
+
                     let mut buf = [0, ..500];
                     stream.read(buf);
                     let request_str = str::from_utf8(buf);
                     debug!("Request:\n{:s}", request_str);
-                    
+
                     let req_group : ~[&str]= request_str.splitn(' ', 3).collect();
                     if req_group.len() > 2 {
                         let path_str = "." + req_group[1].to_owned();
-                        
+
                         let mut path_obj = ~os::getcwd();
                         path_obj.push(path_str.clone());
-                        
+
                         let ext_str = match path_obj.extension_str() {
                             Some(e) => e,
                             None => "",
                         };
-                        
+
                         debug!("Requested path: [{:s}]", path_obj.as_str().expect("error"));
                         debug!("Requested path: [{:s}]", path_str);
-                             
+
                         if path_str == ~"./" {
                             debug!("===== Counter Page request =====");
                             WebServer::respond_with_counter_page(stream, ccounter.clone()); //WebServer safe counter
@@ -307,14 +311,28 @@ impl WebServer {
     
     // FINISHED: Streaming file.
     // TODO: Application-layer file caching.
-    fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
+    fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path, size: u64, cache: &Cache) {
         let mut stream = stream;
         let mut file_reader = File::open(path).expect("Invalid file!");
         //Return an iterator that reads the bytes one by one until EoF
         let mut file_iter = file_reader.bytes();
-        for b in file_iter {
-            stream.write_u8(b);
-        }	
+        if size < cache.max_size {
+            //use a reader, read data into something, use that
+            let mut data: ~[u8] = ~[];
+            let mut mem_writer = MemWriter::new();
+            for b in file_iter {
+                stream.write_u8(b);
+                mem_writer.write_u8(b);
+            }
+            //data_receiver.write(data);
+            let output: ~str = from_u8(mem_writer.unwrap());
+            cache.load(path, data);
+        }
+        else {
+            for b in file_iter {
+                stream.write_u8(b);
+            }
+        }
             //stream.write(HTTP_OK.as_bytes());
             //stream.write(file_reader.read_to_end());
     }
@@ -417,6 +435,9 @@ impl WebServer {
         
         let (request_port, request_chan) = Chan::new();
         let port = MutexArc::new(request_port);
+
+        let cache = Cache::new(6000000);
+        let cache_get = MutexArc::new(cache);
         
         //Will allow for creating the same number of tasks as we have cores
         //Allows for the downloading of multiple different files at the same time
@@ -429,6 +450,7 @@ impl WebServer {
             let sem = sem.clone();
             let port = port.clone();
             let name = i.clone();
+            let cache_get = cache_get.clone();
             debug!("Starting task {:?}", name)
             spawn( proc() {
                 let name = name.clone();
@@ -440,9 +462,7 @@ impl WebServer {
                     //let request: HTTP_Request = request_port.recv();
                     let request: HTTP_Request = port.unsafe_access(|req| {let r: HTTP_Request =(*req).recv(); r.clone()});
                     sem.release();
-                    debug!("Task {:?} release", name)
-
-                    
+                    debug!("Task {:?} release", name);
                     // Get stream from hashmap.
                     // Use unsafe method, because TcpStream in Rust 0.9 doesn't have "Freeze" bound.
                     let (stream_port, stream_chan) = Chan::new();
@@ -452,7 +472,15 @@ impl WebServer {
                     });
                     
                     let stream = stream_port.recv();
-                    WebServer::respond_with_static_file(stream, request.path);
+                    cache_get.access(|cache|{
+                        if cache.contains(&request) {
+                            cache.get(&request, stream);
+                        }
+                        else {
+                            WebServer::respond_with_static_file(stream, request.path, request.stat().size, cache);
+                            //cache.load(request);
+                        }
+                    });
                     // Close stream automatically.
                     debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
                     }

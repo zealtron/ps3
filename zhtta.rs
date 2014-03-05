@@ -17,10 +17,8 @@
 extern mod extra;
 
 use std::io::*;
-use std::io::mem::MemWriter;
 use std::io::net::ip::{SocketAddr};
-use std::{os, str, run, libc, from_str, mem};
-use std::num::from_u8;
+use std::{os, str, run, libc, from_str};
 use std::path::Path;
 use std::hashmap::HashMap;
 
@@ -34,6 +32,7 @@ static SERVER_NAME : &'static str = "Zhtta Version 0.5";
 
 static IP : &'static str = "127.0.0.1";
 static PORT : uint = 4414;
+static MAX_SIZE :u64 = 6000000;
 static WWW_DIR : &'static str = "./www";
 
 static HTTP_OK : &'static str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
@@ -46,15 +45,16 @@ static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, 
              </style></head>
              <body>";
 
+
 struct Page {
     size: u64,
-    data: ~str,
+    data: ~[u8],
     accesses: int,
     last_access: Timespec,
 }
 
 impl Page {
-    fn new(_size:u64, _data: ~str) -> Page{
+    fn new(_size:u64, _data: ~[u8]) -> Page{
         Page {
             size: _size,
             data: _data,
@@ -73,27 +73,31 @@ struct Cache {
     files: HashMap<~str, Page>,
 }
 impl Cache {
-    fn new(msize: u64) -> Cache {
+    fn new() -> Cache {
         Cache {
-            max_size: msize,
+            max_size: MAX_SIZE,
             current_size: 0,
             files: HashMap::new(),
         }
     }
     //maybe only access if it exists, and then write it instead of trying to transfer the string
     //or maybe pop the Page, use it, and then reinsert it because of caching algorithm
-    fn get_files(~self) -> HashMap<~str, Page> {
-        (self.files)
-    }
-    fn get(&mut self, path:~str, mut stream:std::io::net::tcp::TcpStream) {
-        let p: &mut Page = self.files.get_mut(&path);
+//    #[ignore(dead_code)]
+//    fn get_files(~self) -> HashMap<~str, Page> {
+//        (self.files)
+//    }
+    fn get(&mut self, path:&~str, stream:  Option<std::io::net::tcp::TcpStream>) {
+        debug!("Cache get {:?}", path);
+        let p: &mut Page = self.files.get_mut(path);
         p.update();
-        stream.write(p.data.as_bytes()) ;
+        let mut stream = stream;
+        stream.write(p.data) ;
     }
     fn contains(&self, req: &HTTP_Request)->bool {
         self.files.contains_key(&(req.path.filename_str().unwrap().to_owned()))
     }
-    fn load(&mut self, _path:~Path, _data: ~str){
+    fn load(&mut self, _path:~Path, _data: ~[u8]){
+        debug!("Cache load {:?}", _path);
         let p = Page::new(_path.stat().size, _data);
         let psize =_path.stat().size;
         //as long as the file is less than the size of the cache
@@ -311,34 +315,64 @@ impl WebServer {
     
     // FINISHED: Streaming file.
     // TODO: Application-layer file caching.
-    fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path, size: u64, cache: &Cache) {
+    fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, http: &HTTP_Request, cache_get: &MutexArc<Cache>) {
         let mut stream = stream;
-        let mut file_reader = File::open(path).expect("Invalid file!");
+        let mut file_reader = File::open(http.path).expect("Invalid file!");
         //Return an iterator that reads the bytes one by one until EoF
         let mut file_iter = file_reader.bytes();
-        if size < cache.max_size {
-            //use a reader, read data into something, use that
-            let mut data: ~[u8] = ~[];
-            let mut mem_writer = MemWriter::new();
-            for b in file_iter {
-                stream.write_u8(b);
-                mem_writer.write_u8(b);
+        let (stream_port, stream_chan) = Chan::new();
+        //check to make sure the file is small enough to be cached
+        if http.path.stat().size < MAX_SIZE {
+            //if the cache contains the request, this will be received in the first access
+            //otherwise it will be received in the second one
+            stream_chan.send(stream);
+            //ports for cache use
+            let (bool_port, bool_chan) = Chan::new();
+            //access cache to see if file is loaded
+            cache_get.access(|cache| {
+                if cache.contains(http) {
+                    let stream = stream_port.recv();
+                    cache.get(&(http.path.filename_str().unwrap().to_owned()), stream);
+                    bool_chan.send(false);
+                }
+                else {
+                    //release cache until we have all of the data
+                    bool_chan.send(true);
+                }
+            });
+            
+            let flag = bool_port.recv();
+            //if the cache doesn't contain the file, run this
+            if flag {
+                let mut stream = stream_port.recv();
+                //write file and store it in memory at the same time
+                let mut data  = ~[];
+                for b in file_iter {
+                    data.push(b);
+                    stream.write_u8(b);
+                }
+                //access cache and load data
+                cache_get.access(|cache| {
+                    //check again just to be sure
+                    if !cache.contains(http) {
+                        cache.load(((http.path).clone()), data.clone());
+                    }
+                });
             }
-            //data_receiver.write(data);
-            let output: ~str = from_u8(mem_writer.unwrap());
-            cache.load(path, data);
         }
+        //if the file is too large, just stream it
         else {
             for b in file_iter {
                 stream.write_u8(b);
             }
         }
-            //stream.write(HTTP_OK.as_bytes());
-            //stream.write(file_reader.read_to_end());
     }
-    
-    // finished: Server-side gashing.
-    // Testing with localhost:4414/index.shtml
+        //stream.write(HTTP_OK.as_bytes());
+        //stream.write(file_reader.read_to_end());
+
+
+        // finished: Server-side gashing.
+        // Testing with localhost:4414/index.shtml
     fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
         // for now, just serve as static file
     	let mut stream = stream;
@@ -392,7 +426,8 @@ impl WebServer {
 	    let req_ip = req.peer_name.clone();
 	    let sub_1 = req_ip.slice(0, 8).to_owned();
 	    let sub_2 = req_ip.slice(0, 7).to_owned();
-
+        
+        debug!("Queue len is {:?}", local_req_queue.len());
 	    for i in range(0, local_req_queue.len() - 1) {
             let comp_ip = local_req_queue[i].peer_name.clone();
                 let comp_1 = comp_ip.slice(0, 8).to_owned();
@@ -415,7 +450,7 @@ impl WebServer {
                     local_req_queue.push(req);
                     break;
                 }
-	    }
+        }
 
 
         debug!("A new request enqueued, now the length of queue is {:u}.", local_req_queue.len());
@@ -436,7 +471,7 @@ impl WebServer {
         let (request_port, request_chan) = Chan::new();
         let port = MutexArc::new(request_port);
 
-        let cache = Cache::new(6000000);
+        let cache = Cache::new();
         let cache_get = MutexArc::new(cache);
         
         //Will allow for creating the same number of tasks as we have cores
@@ -472,15 +507,18 @@ impl WebServer {
                     });
                     
                     let stream = stream_port.recv();
-                    cache_get.access(|cache|{
+                    WebServer::respond_with_static_file(stream, &request, &cache_get);
+                    /*cache_get.access(|cache|{
                         if cache.contains(&request) {
-                            cache.get(&request, stream);
+                            cache.get(&request.path.filename_str().unwrap().to_owned(), stream);
                         }
                         else {
-                            WebServer::respond_with_static_file(stream, request.path, request.stat().size, cache);
+                            let mut stream = stream;
+                            WebServer::respond_with_static_file(stream, request.path, request.path.stat().size, cache);
                             //cache.load(request);
                         }
                     });
+                    */
                     // Close stream automatically.
                     debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
                     }

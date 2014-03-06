@@ -425,7 +425,8 @@ impl WebServer {
             let req: HTTP_Request = req_port.recv();
             if local_req_queue.len() == 0 {
                 local_req_queue.push(req);
-            } else {
+            } 
+            else {
                 let req_ip = req.peer_name.clone();
                 let sub_1 = req_ip.slice(0, 8).to_owned();
                 let sub_2 = req_ip.slice(0, 7).to_owned();

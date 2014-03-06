@@ -302,7 +302,7 @@ impl WebServer {
 	    	if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
 			local_req_queue.insert(i, req);
 			break;
-		} else if (str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && (str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) || !(str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54.")) {
+		} else if ((str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && (str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54."))) || (!(str::eq(&sub_1, &~"128.143.") || str::eq(&sub_2, &~"137.54.")) && !(str::eq(&comp_1, &~"128.143.") || str::eq(&comp_2, &~"137.54."))) {
 			let comp_path = req.path.clone();
 			let comp_size = comp_path.stat().size;
 			let req_path = req.path.clone();

@@ -97,7 +97,7 @@ impl Cache {
         self.files.contains_key(&(req.path.filename_str().unwrap().to_owned()))
     }
     fn load(&mut self, _path:~Path, _data: ~[u8]){
-        debug!("Cache load {:?}", _path);
+        debug!("Cache load {:?}", _path.filename_str());
         let p = Page::new(_path.stat().size, _data);
         let psize =_path.stat().size;
         //as long as the file is less than the size of the cache
@@ -111,7 +111,7 @@ impl Cache {
                 }
             }
             //insert file
-            debug!("Inserting {:?} into cache", _path);
+            debug!("Inserting {:?} into cache", _path.filename_str());
             self.files.insert(_path.filename_str().unwrap().to_owned(), p);
         }
     }

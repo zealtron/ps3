@@ -189,15 +189,12 @@ impl WebServer {
             None=>1,
         };
         
-
-		
         WebServer {
             ip: ip.to_owned(),
             port: port,
             www_dir_path: www_dir_path,     
 
     	    visitor_arc: RWArc::new(0u),
-			           
             request_queue_arc: MutexArc::new(~[]),
             stream_map_arc: MutexArc::new(HashMap::new()),
             
@@ -240,7 +237,6 @@ impl WebServer {
                     WebServer::update_count(ccounter.clone()); //finished safe counter
 
                     let request_queue_arc = queue_port.recv();
-
                     let mut stream = stream;
 
                     let peer_name = WebServer::get_peer_name(&mut stream);
@@ -279,7 +275,14 @@ impl WebServer {
                             debug!("=====Terminated connection from [{:s}].=====", peer_name);
                         } else { 
                             debug!("===== Static Page request =====");
-                            WebServer::enqueue_static_file_request(stream, path_obj, stream_map_arc, request_queue_arc, notify_chan);
+                            let path_clone = path_obj.clone();
+                            let path_size = path_clone.stat().size;
+                            if path_size < 512 {
+                                WebServer::respond_with_small_file(stream, path_obj);
+                                debug!("Handling small static file in listener");
+                            } else {
+                                WebServer::enqueue_static_file_request(stream, path_obj, stream_map_arc, request_queue_arc, notify_chan);
+                            }
                         }
                     }
                 });
@@ -311,6 +314,15 @@ impl WebServer {
                     count );
         debug!("Responding to counter request");
         stream.write(response.as_bytes());
+    }
+    fn respond_with_small_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
+        let mut stream = stream;
+        let mut file_reader = File::open(path).expect("Invalid file!");
+        //Return an iterator that reads the bytes one by one until EoF
+        let mut file_iter = file_reader.bytes();
+        for b in file_iter {
+            stream.write_u8(b);
+        }
     }
     
     // FINISHED: Streaming file.
@@ -367,9 +379,6 @@ impl WebServer {
             }
         }
     }
-        //stream.write(HTTP_OK.as_bytes());
-        //stream.write(file_reader.read_to_end());
-
 
         // finished: Server-side gashing.
         // Testing with localhost:4414/index.shtml
@@ -386,7 +395,7 @@ impl WebServer {
         let response: ~str =
             format!("{}{}{}", file_contents.slice_to(cmd_start), gash_output, file_contents.slice_from(cmd_end));	
         stream.write(response.as_bytes());
-        }
+    }
         //Run gash and run the command sent to it and return the output	
     fn run_cmd_in_gash(cmd: &str) -> ~str {
         let mut gash = run::Process::new("./gash", &[~"-c",cmd.to_owned()], run::ProcessOptions::new()).unwrap();
@@ -464,8 +473,7 @@ impl WebServer {
     
     
     }
-    
-    // TODO: Smarter Scheduling.
+     // TODO: Smarter Scheduling.
     fn dequeue_static_file_request(&mut self) {
         let req_queue_get = self.request_queue_arc.clone();
         let stream_map_get = self.stream_map_arc.clone();
@@ -512,17 +520,6 @@ impl WebServer {
                     
                     let stream = stream_port.recv();
                     WebServer::respond_with_static_file(stream, &request, &cache_get);
-                    /*cache_get.access(|cache|{
-                        if cache.contains(&request) {
-                            cache.get(&request.path.filename_str().unwrap().to_owned(), stream);
-                        }
-                        else {
-                            let mut stream = stream;
-                            WebServer::respond_with_static_file(stream, request.path, request.path.stat().size, cache);
-                            //cache.load(request);
-                        }
-                    });
-                    */
                     // Close stream automatically.
                     debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
                     }
@@ -616,3 +613,5 @@ fn main() {
     let mut zhtta = WebServer::new(ip_str, port, www_dir_str);
     zhtta.run();
 }
+
+    
